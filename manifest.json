@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "UI-to-Code Navigator",
+  "version": "1.0",
+  "description": "Navigate from UI elements to their source code",
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "48": "logo.png"
+    }
+  },
+  "permissions": ["activeTab", "scripting"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content.js"]
+    }
+  ]
+}
