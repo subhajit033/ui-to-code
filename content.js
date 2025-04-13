@@ -357,6 +357,76 @@ function handleElementSelect(event) {
   return false;
 }
 
+// function extractComponentInfo(element) {
+//   // Basic information about the element
+//   const info = {
+//     tagName: element.tagName.toLowerCase(),
+//     id: element.id,
+//     className: element.className,
+//     textContent: element.textContent.trim().substring(0, 50),
+//     attributes: {},
+//     rect: element.getBoundingClientRect().toJSON(),
+//   };
+
+//   // Extract all attributes
+//   for (let i = 0; i < element.attributes.length; i++) {
+//     const attr = element.attributes[i];
+//     info.attributes[attr.name] = attr.value;
+//   }
+
+//   // Extract React component info if available
+//   // This works for React apps with react-devtools
+//   if (
+//     element._reactRootContainer ||
+//     element._reactInternalInstance ||
+//     element[
+//       Object.keys(element).find((key) =>
+//         key.startsWith('__reactInternalInstance')
+//       )
+//     ]
+//   ) {
+//     info.isReact = true;
+
+//     // Try to find component name from various properties in React 16+
+//     const reactKey = Object.keys(element).find(
+//       (key) =>
+//         key.startsWith('__reactFiber') ||
+//         key.startsWith('__reactInternalInstance')
+//     );
+
+//     if (reactKey && element[reactKey]) {
+//       const fiberNode = element[reactKey];
+//       if (fiberNode.return && fiberNode.return.type) {
+//         // Extract component name
+//         if (typeof fiberNode.return.type === 'function') {
+//           info.componentName =
+//             fiberNode.return.type.name || 'AnonymousComponent';
+//         } else if (typeof fiberNode.return.type === 'string') {
+//           info.componentName = fiberNode.return.type;
+//         }
+//       }
+//     }
+//   }
+
+//   // Extract Vue.js component info if available
+//   if (element.__vue__) {
+//     info.isVue = true;
+//     info.componentName =
+//       element.__vue__.$options.name ||
+//       element.__vue__.$options._componentTag ||
+//       'AnonymousComponent';
+//   }
+
+//   // Try to extract more specific info from data attributes
+//   const dataAttrs = {};
+//   for (const key in element.dataset) {
+//     dataAttrs[key] = element.dataset[key];
+//   }
+//   info.dataAttributes = dataAttrs;
+
+//   return info;
+// }
+
 function extractComponentInfo(element) {
   // Basic information about the element
   const info = {
@@ -374,6 +444,11 @@ function extractComponentInfo(element) {
     info.attributes[attr.name] = attr.value;
   }
 
+  // Initialize source location properties
+  info.compiledPath = null;
+  info.line = null;
+  info.column = null;
+
   // Extract React component info if available
   // This works for React apps with react-devtools
   if (
@@ -386,6 +461,7 @@ function extractComponentInfo(element) {
     ]
   ) {
     info.isReact = true;
+    info.framework = 'react';
 
     // Try to find component name from various properties in React 16+
     const reactKey = Object.keys(element).find(
@@ -404,6 +480,17 @@ function extractComponentInfo(element) {
         } else if (typeof fiberNode.return.type === 'string') {
           info.componentName = fiberNode.return.type;
         }
+
+        // Extract source location from React dev tools (if available)
+        if (fiberNode.return._debugSource) {
+          info.compiledPath = fiberNode.return._debugSource.fileName;
+          info.line = fiberNode.return._debugSource.lineNumber;
+          info.column = fiberNode.return._debugSource.columnNumber;
+        } else if (fiberNode._debugSource) {
+          info.compiledPath = fiberNode._debugSource.fileName;
+          info.line = fiberNode._debugSource.lineNumber;
+          info.column = fiberNode._debugSource.columnNumber;
+        }
       }
     }
   }
@@ -411,18 +498,57 @@ function extractComponentInfo(element) {
   // Extract Vue.js component info if available
   if (element.__vue__) {
     info.isVue = true;
+    info.framework = 'vue';
     info.componentName =
       element.__vue__.$options.name ||
       element.__vue__.$options._componentTag ||
       'AnonymousComponent';
+
+    // Try to extract source information for Vue components
+    if (element.__vue__.$options.__file) {
+      info.compiledPath = element.__vue__.$options.__file;
+    }
   }
 
   // Try to extract more specific info from data attributes
   const dataAttrs = {};
   for (const key in element.dataset) {
     dataAttrs[key] = element.dataset[key];
+
+    // Look for source info in data attributes
+    if (key === 'sourcePath' || key === 'sourceFile') {
+      info.compiledPath = element.dataset[key];
+    }
+    if (key === 'sourceLine') {
+      info.line = parseInt(element.dataset[key], 10);
+    }
+    if (key === 'sourceColumn') {
+      info.column = parseInt(element.dataset[key], 10);
+    }
   }
   info.dataAttributes = dataAttrs;
+
+  // If no source location was found and this is a development build,
+  // try to get location from stack trace as a last resort
+  if (!info.compiledPath) {
+    try {
+      throw new Error('Source finder');
+    } catch (e) {
+      const stackLines = e.stack.split('\n');
+      // Look for application code in the stack
+      for (const line of stackLines) {
+        if (line.includes('/static/js/') || line.includes('/src/')) {
+          const match = line.match(/\((.*):(\d+):(\d+)\)$/);
+          if (match) {
+            info.compiledPath = match[1];
+            info.line = parseInt(match[2], 10);
+            info.column = parseInt(match[3], 10);
+            break;
+          }
+        }
+      }
+    }
+  }
 
   return info;
 }
